@@ -24,7 +24,7 @@ except Exception as e:
     st.error(f"APIの初期化中にエラーが発生しました: {e}")
     st.stop()
 
-# 2. 【変更】CSVに加えて、Excelファイル（.xlsx）もアップロードできるように設定
+# 2. CSVに加えて、Excelファイル（.xlsx）もアップロードできるように設定
 uploaded_file = st.file_uploader(
     "クレンジングしたいファイルを選択してください（CSV / Excel .xlsx 両対応）",
     type=["csv", "xlsx"],
@@ -35,7 +35,7 @@ if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
 
 if uploaded_file is not None:
-    # 3. 【変更】ファイルの読み込み（拡張子がxlsxならExcelとして、それ以外ならCSVとして自動判別）
+    # 3. ファイルの読み込み（拡張子がxlsxならExcelとして、それ以外ならCSVとして自動判別）
     try:
         if uploaded_file.name.endswith(".xlsx"):
             # Excelファイルを読み込む
@@ -60,8 +60,8 @@ if uploaded_file is not None:
         # 4. ボタン押下時にスピナーを表示
         with st.spinner("Geminiがデータを整形中..."):
             try:
-                # 7. モデル（gemini-1.5-flash）の呼び出し
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                # 7. 【修正】利用可能な最新モデル（gemini-2.0-flash）に変更
+                model = genai.GenerativeModel("gemini-2.0-flash")
 
                 # 8. 表データをJSON形式のテキストに変換 (orient='records' で配列形式に)
                 data_json_str = df.to_json(orient="records", force_ascii=False)
