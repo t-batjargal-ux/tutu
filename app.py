@@ -1,131 +1,182 @@
 import json
-import google.generativeai as genai
 import pandas as pd
 import streamlit as st
+from openai import OpenAI
 
 # 1. ページ全体をワイドモードに設定
-st.set_page_config(layout="wide")
-
-st.title("✨ AIデータクレンジング・アシスタント")
-st.write(
-    "アップロードされたCSVまたはExcelデータを、Gemini APIを利用して自動で表記揺れの修正や整形を行います。"
+st.set_page_config(
+    page_title="AI Data Cleansing Pro (Prototype)",
+    page_icon="🪄",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# 6. APIキーを st.secrets から取得し設定
+# 視覚的な微調整（コンテナの上部パディングを最適化）
+st.markdown(
+    """
+    <style>
+    .block-container { padding-top: 2.5rem; padding-bottom: 2.5rem; }
+    </style>
+""",
+    unsafe_html=True,
+)
+
+# ヘッダーエリア
+st.title("🪄 AI Data Cleansing Professional")
+st.caption(
+    "【プロトタイプ版: OpenAI駆動】高度なAIデータクレンジング・プラットフォーム。表記揺れや表記規則の統一をワンクリックで実行します。"
+)
+st.markdown("---")
+
+# 6. OpenAI APIキーを st.secrets から取得しクライアントを初期化
 try:
-    if "GEMINI_API_KEY" not in st.secrets:
+    if "OPENAI_API_KEY" not in st.secrets:
         st.error(
-            "エラー: `GEMINI_API_KEY` が設定されていません。Streamlit Cloudの Advanced settings ➔ Secrets に登録してください。"
+            "【システムエラー】 `OPENAI_API_KEY` が設定されていません。Streamlit Cloudの Advanced settings ➔ Secrets に登録してください。"
         )
         st.stop()
 
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    # OpenAIクライアントの初期化
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except Exception as e:
-    st.error(f"APIの初期化中にエラーが発生しました: {e}")
+    st.error(f"OpenAIクライアントの初期化中にエラーが発生しました: {e}")
     st.stop()
 
-# 2. CSVに加えて、Excelファイル（.xlsx）もアップロードできるように設定
-uploaded_file = st.file_uploader(
-    "クレンジングしたいファイルを選択してください（CSV / Excel .xlsx 両対応）",
-    type=["csv", "xlsx"],
-)
+# --- STEP 1: ファイルのインポート ---
+with st.container(border=True):
+    st.markdown(
+        "<h4 style='margin-top:0;'>📥 Step 1: 対象ファイルのインポート</h4>",
+        unsafe_html=True,
+    )
+    uploaded_file = st.file_uploader(
+        "CSVまたはExcelファイルをここにドロップしてください（UTF-8 / cp932 / .xlsx 対応）",
+        type=["csv", "xlsx"],
+        label_visibility="collapsed",
+    )
 
-# Streamlitの再実行によるデータ消失を防ぐため、セッション状態で整形後データを管理
+# セッション状態で整形後データを管理
 if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
 
 if uploaded_file is not None:
-    # 3. ファイルの読み込み（拡張子がxlsxならExcelとして、それ以外ならCSVとして自動判別）
+    # 3. ファイルの読み込み（拡張子自動判別）
     try:
         if uploaded_file.name.endswith(".xlsx"):
-            # Excelファイルを読み込む
             df = pd.read_excel(uploaded_file)
         else:
-            # CSVファイルを読み込む（UTF-8 と cp932 を自動判別）
             try:
                 df = pd.read_csv(uploaded_file, encoding="utf-8")
             except UnicodeDecodeError:
                 df = pd.read_csv(uploaded_file, encoding="cp932")
-
-        st.subheader("📋 アップロードデータのプレビュー")
-        st.dataframe(df, use_container_width=True)
     except Exception as e:
         st.error(
-            f"ファイルの読み込みに失敗しました。ファイルが破損していないか、形式を確認してください。エラー: {e}"
+            f"ファイルの読み込みに失敗しました。ファイル形式を確認してください。エラー: {e}"
         )
         st.stop()
 
-    # 4. クレンジング一括実行ボタンの配置
-    if st.button("🚀 クレンジングを一括実行する", type="primary"):
-        # 4. ボタン押下時にスピナーを表示
-        with st.spinner("Geminiがデータを整形中..."):
-            try:
-                # 7. 【修正】利用可能な最新モデル（gemini-2.0-flash）に変更
-                model = genai.GenerativeModel("gemini-2.0-flash")
+    # --- STEP 2: アップロードデータのプレビュー ---
+    st.markdown("<br>", unsafe_html=True)
+    with st.container(border=True):
+        st.markdown(
+            f"<h4 style='margin-top:0;'>📋 Step 2: アップロードデータの確認 <span style='font-size:14px; font-weight:normal; color:gray;'>({uploaded_file.name})</span></h4>",
+            unsafe_html=True,
+        )
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-                # 8. 表データをJSON形式のテキストに変換 (orient='records' で配列形式に)
+    # --- STEP 3: クレンジング実行エリア ---
+    st.markdown("<br>", unsafe_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown(
+            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>ルール：取引先名の株式会社統一 / 住所の半角統一</p>",
+            unsafe_html=True,
+        )
+        execute_button = st.button(
+            "🚀 クレンジングを一括実行する", type="primary", use_container_width=True
+        )
+
+    if execute_button:
+        with st.spinner("OpenAI GPT が高度なデータモデリングと整形を実行中..."):
+            try:
+                # 表データをJSON形式のテキストに変換
                 data_json_str = df.to_json(orient="records", force_ascii=False)
 
-                # 指示ルールのプロンプト作成
+                # 指示ルールのプロンプト作成（OpenAIのJSON Mode要件に最適化）
                 prompt = f"""
-以下のJSON形式のデータを、指定された【指示ルール】に従ってクレンジングし、元の構造（オブジェクトの配列）を維持したままJSON形式で返してください。
+以下のJSON形式のデータを、指定された【指示ルール】に従ってクレンジングし、指定のJSONオブジェクト構造で返してください。
 
 【指示ルール】
 1. 「取引先名」の「㈱」や「(株)」はすべて「株式会社」に統一してください。
 2. 「住所」の英数字や郵便番号、ハイフンはすべて半角に統一してください。
 3. 必ず元の列名を完全に維持してください。
-4. 出力は指定されたJSONデータのみとし、説明文やマークダウンの装飾（```json など）は含めないでください。
+
+【出力構造】
+必ず、以下のように "data" というキーを持ったJSONオブジェクト形式で出力してください。
+{{
+  "data": [ここにクレンジング済みのオブジェクトの配列が入る]
+}}
 
 【対象データ】
 {data_json_str}
 """
 
-                # 9. 構造化出力を確実にするための generation_config 設定
-                generation_config = {"response_mime_type": "application/json"}
-
-                # APIリクエストの送信
-                response = model.generate_content(
-                    prompt, generation_config=generation_config
+                # OpenAI APIリクエストの送信（高精度・高速な gpt-4o-mini を採用。必要に応じて gpt-4o に変更可能）
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a professional data cleansing assistant. You always output valid JSON adhering strictly to the requested schema.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.0,  # データの変形を防ぎ、決定論的な出力を得るため0に設定
                 )
 
-                # 10. 返ってきたJSONテキストをパースしてDataFrameに再変換
-                cleaned_json = json.loads(response.text)
-                st.session_state.cleaned_df = pd.DataFrame(cleaned_json)
+                # 返ってきたJSONテキストをパース
+                response_text = response.choices[0].message.content
+                cleaned_json = json.loads(response_text)
 
-                st.success("✨ クレンジング処理が正常に完了しました！")
+                # "data" キーから配列を取り出して DataFrame に再変換
+                st.session_state.cleaned_df = pd.DataFrame(cleaned_json["data"])
+                st.toast("✨ クレンジング処理が正常に完了しました！")
 
-            except json.JSONDecodeError as json_err:
-                st.error(
-                    f"Geminiからの応答をJSONとしてパースできませんでした。データ構造が複雑すぎる可能性があります。: {json_err}"
-                )
-                if "response" in locals() and hasattr(response, "text"):
-                    with st.expander("APIからの生の応答データ"):
-                        st.code(response.text)
             except Exception as e:
-                st.error(f"クレンジング処理中に予期せぬエラーが発生しました: {e}")
+                st.error(f"クレンジング処理中にエラーが発生しました: {e}")
 
-    # 11. 整形後のデータを表示（セッション状態にデータがある場合）
+    # --- STEP 4: 整形後データのレビューとエクスポート ---
     if st.session_state.cleaned_df is not None:
-        st.markdown("---")
-        st.subheader("📝 クレンジング済みデータ（手動修正が可能です）")
-
-        # st.data_editor を使って画面上で手動修正を可能に
-        edited_df = st.data_editor(
-            st.session_state.cleaned_df,
-            key="cleaned_data_editor",
-            use_container_width=True,
-        )
-
-        # 12. ダウンロードボタンの配置とエラーハンドリング
-        try:
-            # 日本のExcelでダブルクリックして開いても絶対に文字化けしないよう、BOM付きUTF-8 (utf-8-sig) で出力
-            csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
-
-            st.download_button(
-                label="📥 クレンジング済みデータをダウンロード (CSV)",
-                data=csv_data,
-                file_name="cleaned_customer_list.csv",
-                mime="text/csv",
+        st.markdown("<br>", unsafe_html=True)
+        with st.container(border=True):
+            st.markdown(
+                "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
+                unsafe_html=True,
             )
-        except Exception as e:
-            st.error(f"ダウンロード用CSVの生成中にエラーが発生しました: {e}")
+            st.markdown(
+                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 必要に応じて、セルをダブルクリックして手動で修正を加えることができます。</p>",
+                unsafe_html=True,
+            )
+
+            edited_df = st.data_editor(
+                st.session_state.cleaned_df,
+                key="cleaned_data_editor",
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # ダウンロードセクションを右下にスマートに配置
+            st.markdown("<br>", unsafe_html=True)
+            d_col1, d_col2 = st.columns([3, 1])
+            with d_col2:
+                try:
+                    csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 CSVファイルとして出力",
+                        data=csv_data,
+                        file_name="cleaned_customer_list.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"CSV生成エラー: {e}")
