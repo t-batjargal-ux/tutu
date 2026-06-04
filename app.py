@@ -24,7 +24,7 @@ st.markdown(
 # ヘッダーエリア
 st.title("🪄 AI Data Cleansing Professional")
 st.caption(
-    "【プロトタイプ版: OpenAI駆動】高度なAIデータクレンジング・プラットフォーム。表記揺れや表記規則の統一をワンクリックで実行します。"
+    "【プロトタイプ版: OpenAI駆動】高度なAIデータクレンジング・プラットフォーム。列名を自動解析し、最適な表記統一を自律的に実行します。"
 )
 st.markdown("---")
 
@@ -88,7 +88,7 @@ if uploaded_file is not None:
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         st.markdown(
-            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>ルール：取引先名の株式会社統一 / 住所の半角統一</p>",
+            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>AIが「会社名」や「住所」に該当する列を自動判定して整形します</p>",
             unsafe_allow_html=True,
         )
         execute_button = st.button(
@@ -101,14 +101,15 @@ if uploaded_file is not None:
                 # 表データをJSON形式のテキストに変換
                 data_json_str = df.to_json(orient="records", force_ascii=False)
 
-                # 指示ルールのプロンプト作成
+                # 【劇的改善】固定列名に依存しない、自律型のプロンプトへ変更
                 prompt = f"""
-以下のJSON形式のデータを、指定された【指示ルール】に従ってクレンジングし、指定のJSONオブジェクト構造で返してください。
+以下のJSON形式のデータを、指定された【指示ルール】に従ってインテリジェントにクレンジングし、指定のJSONオブジェクト構造で返してください。
 
 【指示ルール】
-1. 「取引先名」の「㈱」や「(株)」はすべて「株式会社」に統一してください。
-2. 「住所」の英数字や郵便番号、ハイフンはすべて半角に統一してください。
-3. 必ず元の列名を完全に維持してください。
+1. 列名が何であれ（例：「取引先名」「会社名」「企業名」「顧客名」など）、【会社名や組織名】が格納されていると判断できる列のデータについて、「㈱」や「(株)」などの略称をすべて「株式会社」に統一してください。
+2. 列名が何であれ（例：「住所」「所在地」「送付先」「住所１」など）、【住所情報】が格納されていると判断できる列のデータについて、その中にある英数字、郵便番号、ハイフン、長音記号（ー）をすべて半角（ハイフンは「-」）に統一してください。
+3. 元のデータ構造、列名は完全に維持してください。また、上記に該当しない列（例：担当者名、電話番号、あるいはデータに関係のない文章など）のデータは絶対に改変せず、そのまま維持してください。
+4. もし、データ全体が会社名や住所とは全く関係のない内容（例：マニュアル、仕様書、タスク一覧など）である場合は、データを一切変更せず、そのままの形で返してください。
 
 【出力構造】
 必ず、以下のように "data" というキーを持ったJSONオブジェクト形式で出力してください。
@@ -126,7 +127,7 @@ if uploaded_file is not None:
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a professional data cleansing assistant. You always output valid JSON adhering strictly to the requested schema.",
+                            "content": "You are an expert data architect. You analyze the semantic meaning of columns and perform robust data cleansing according to the rules, while strictly preserving unก็touched columns and schema.",
                         },
                         {"role": "user", "content": prompt},
                     ],
