@@ -107,13 +107,116 @@ if uploaded_file is not None:
                 df_cleaned = df.copy()
                 columns_list = [str(c) for c in df.columns]
 
-                # 1. クレンジング対象の列名を特定
-                mapping_prompt = f"""
+                # 1. クレンジング対象の列名を特定 (💡 f-stringの罠を完全排除)
+                mapping_prompt = """
                 以下の列名リストから、【会社名・取引先名】が格納されている列名と、【住所・所在地】が格納されている列名をそれぞれ1つずつ特定してください。
-                列名リスト: {columns_list}
+                列名リスト: __COLUMNS_LIST__
 
                 必ず以下のJSON構造のみで返答してください。該当する列がない場合はnullにしてください。
-                {{
+                {
                   "company_column": "特定した列名またはnull",
                   "address_column": "特定した列名またはnull"
-                }}
+                }
+                """.replace("__COLUMNS_LIST__", str(columns_list))
+
+                map_res = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": mapping_prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.0,
+                )
+                mapping = json.loads(map_res.choices[0].message.content)
+                company_col = mapping.get("company_column")
+                address_col = mapping.get("address_column")
+
+                # 2. 会社名列の値のみをクレンジング (💡 f-stringの罠を完全排除)
+                if company_col and company_col in df_cleaned.columns:
+                    company_data = df_cleaned[company_col].astype(str).tolist()
+                    comp_prompt = """
+                    以下の文字列配列（会社名）について、「㈱」や「(株)」などの略称をすべて「株式会社」に統一してください。
+                    元の文字列の意味や順序、配列の要素数は絶対に改変しないでください。
+                    必ず、入力と全く同じ要素数（__LEN__個）の配列を以下のJSON形式で返してください。
+                    { "cleaned": ["値1", "値2", ...] }
+                    対象データ: __DATA__
+                    """.replace("__LEN__", str(len(company_data))).replace(
+                        "__DATA__", json.dumps(company_data, ensure_ascii=False)
+                    )
+
+                    comp_res = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": comp_prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.0,
+                    )
+                    cleaned_companies = json.loads(
+                        comp_res.choices[0].message.content
+                    ).get("cleaned", [])
+                    if len(cleaned_companies) == len(company_data):
+                        df_cleaned[company_col] = cleaned_companies
+
+                # 3. 住所列の値のみをクレンジング (💡 f-stringの罠を完全排除)
+                if address_col and address_col in df_cleaned.columns:
+                    address_data = df_cleaned[address_col].astype(str).tolist()
+                    addr_prompt = """
+                    以下の文字列配列（住所）について、含まれる英数字、郵便番号、ハイフン、長音記号（ー）をすべて半角（ハイフンは「-」）に統一してください。
+                    漢字の地名やビル名などは絶対に書き換えないでください。順序や配列の要素数は絶対に改変しないでください。
+                    必ず、入力と全く同じ要素数（__LEN__個）の配列を以下のJSON形式で返してください。
+                    { "cleaned": ["値1", "値2", ...] }
+                    対象データ: __DATA__
+                    """.replace("__LEN__", str(len(address_data))).replace(
+                        "__DATA__", json.dumps(address_data, ensure_ascii=False)
+                    )
+
+                    addr_res = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": addr_prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.0,
+                    )
+                    cleaned_addresses = json.loads(
+                        addr_res.choices[0].message.content
+                    ).get("cleaned", [])
+                    if len(cleaned_addresses) == len(address_data):
+                        df_cleaned[address_col] = cleaned_addresses
+
+                # セッション状態を更新し、コンポーネントのIDを強制リフレッシュ
+                st.session_state.cleaned_df = df_cleaned
+                st.session_state.refresh_counter += 1
+                st.toast("✨ 精密クレンジングが完了しました！")
+
+            except Exception as e:
+                st.error(f"クレンジング処理中にエラーが発生しました: {e}")
+
+    # --- STEP 4: 整形後データのレビューとエクスポート ---
+    if st.session_state.cleaned_df is not None:
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(
+                "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 データ構造が完全に同期されました。自作ボタン・内蔵ボタンのどちらからでも綺麗に複数列でダウンロード可能です。</p>",
+                unsafe_allow_html=True,
+            )
+
+            # 動的キーにより、メモリ内のキャッシュを完全破棄。本物の複数列を維持
+            edited_df = st.data_editor(
+                st.session_state.cleaned_df,
+                key=f"data_editor_core_{st.session_state.refresh_counter}",
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            d_col1, d_col2 = st.columns([3, 1])
+            with d_col2:
+                try:
+                    # 本物の複数列を持つDataFrameから、Excel対応のBOM付きCSVデータをクリーンに生成
+                    csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
+
+                    # ボタンの鍵（key）を完全に同期させ、最新の複数列CSVを強制エクスポート
+                    st.download_button(
+                        label="📥 CSVファイルとして出力",
+                        data=csv_data,
+                        file_name="cleaned_customer_list
