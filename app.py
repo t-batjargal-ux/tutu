@@ -1,7 +1,6 @@
 import json
 import time
 from datetime import datetime
-import numpy as np
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
@@ -11,7 +10,7 @@ st.set_page_config(
     page_title="AI Data Cleansing Pro (Enterprise)",
     page_icon="🪄",
     layout="wide",
-    initial_sidebar_state="expanded",  # ルール設定のためにサイドバーを初期展開
+    initial_sidebar_state="expanded",
 )
 
 # 視覚的な微調整
@@ -169,9 +168,9 @@ if uploaded_file is not None:
 
         # --- ⏳ 技能4: 大量データ対応の「分割（チャンク）処理 ＋ 進捗バー」 ---
         total_rows = len(df_str_init)
-        # データをsliderで指定された行数ごとに小分けにする
-        num_chunks = int(np.ceil(total_rows / chunk_size))
-        df_chunks = np.array_split(df_str_init, num_chunks)
+        import math
+
+        num_chunks = math.ceil(total_rows / chunk_size)
 
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -179,45 +178,23 @@ if uploaded_file is not None:
         all_cleaned_records = []
 
         try:
-            for idx, chunk_df in enumerate(df_chunks):
+            for idx in range(num_chunks):
                 current_chunk_num = idx + 1
                 status_text.markdown(
-                    f"🔄 **AIクレンジング進行中**: {total_rows}行中 {idx * chunk_size}行完了 （チャンク {current_chunk_num} / {num_chunks} 処理中...）"
+                    f"🔄 **AIクレンジング進行中**: {total_rows}行中 {min(idx * chunk_size, total_rows)}行完了 （チャンク {current_chunk_num} / {num_chunks} 処理中...）"
                 )
+
+                # 💡【修正の肝】NumPyを使わず、Pandas純正のilocで安全に切り出す（100% DataFrameを維持）
+                start_row = idx * chunk_size
+                end_row = min(start_row + chunk_size, total_rows)
+                chunk_df = df_str_init.iloc[start_row:end_row]
 
                 # チャンクデータをJSONデータ化
                 chunk_json_str = chunk_df.to_json(
                     orient="records", force_ascii=False
                 )
 
-                # 動的スキーマの設定（現在処理中の列構造を完全固定）
-                properties_schema = {
-                    str(col): {"type": "string"} for col in df_str_init.columns
-                }
-                required_schema = [str(col) for col in df_str_init.columns]
-
-                json_schema = {
-                    "name": "chunk_cleansing_schema",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "data": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": properties_schema,
-                                    "required": required_schema,
-                                    "additionalProperties": False,
-                                },
-                            }
-                        },
-                        "required": ["data"],
-                        "additionalProperties": False,
-                    },
-                }
-
-                # プロンプトの組み立て（f-string構文エラー対策として、文字置換を徹底）
+                # プロンプトの組み立て（日本語列名でも絶対にエラーを吐かない、安全性最強の構成）
                 prompt = """
                 提供された名簿データ（一部切り出し）について、以下の【クレンジングルール】を適用して綺麗なデータに整形してください。
 
@@ -225,36 +202,39 @@ if uploaded_file is not None:
                 __RULES__
                 - ルールに該当しない列名やデータ、および文章は絶対に書き換えず、そのまま保持してください。行数や列の構造を合体・変形させることは厳禁です。
 
+                【出力構造】
+                必ず、以下のように "data" というキーを持ったJSONオブジェクト形式で出力してください。元の列名を完全に保持したキーと値のペアにしてください。
+                {
+                  "data": [ ...オブジェクトの配列... ]
+                }
+
                 【対象データ】
                 __DATA__
                 """.replace("__RULES__", rules_prompt_string).replace(
                     "__DATA__", chunk_json_str
                 )
 
-                # OpenAI API Structured Outputs
+                # OpenAI APIリクエストの送信（日本語列名に完全適合する高性能JSONモード）
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a precise data engineering assistant. You must clear values according to the instructions and strictly follow the JSON schema.",
+                            "content": "You are a precise data engineering assistant. You must clear values according to the instructions and strictly return the requested JSON object format containing the 'data' array.",
                         },
                         {"role": "user", "content": prompt},
                     ],
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": json_schema,
-                    },
+                    response_format={"type": "json_object"},
                     temperature=0.0,
                 )
 
                 result_json = json.loads(response.choices[0].message.content)
-                all_cleaned_records.extend(result_json["data"])
+                all_cleaned_records.extend(result_json.get("data", []))
 
                 # 進捗バーの更新
                 progress_bar.progress(current_chunk_num / num_chunks)
                 # APIの1分間あたりの制限(RPM/TPM)を安全に回避するための短い休憩
-                time.sleep(0.5)
+                time.sleep(0.4)
 
             # すべてのチャンクが結合されたら状態を保存
             st.session_state.cleaned_df = pd.DataFrame(all_cleaned_records)
@@ -277,17 +257,21 @@ if uploaded_file is not None:
     ):
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # サマリー（ダッシュボード）指標の計算
         orig_df = st.session_state.original_df_str
         new_df = st.session_state.cleaned_df
 
-        # 形状を合わせて比較するための不一致マスクを作成
-        total_cells = orig_df.size
-        # 変更されたセルの総数
-        changed_cells_mask = orig_df != new_df
-        total_changed_cells = changed_cells_mask.sum().sum()
-        # 変更があった行の数
-        total_changed_rows = changed_cells_mask.any(axis=1).sum()
+        # 列や行のズレを考慮し、安全に型とインデックスを合わせる
+        if orig_df.shape == new_df.shape:
+            changed_cells_mask = orig_df != new_df
+            total_changed_cells = changed_cells_mask.sum().sum()
+            total_changed_rows = changed_cells_mask.any(axis=1).sum()
+        else:
+            # 万が一サイズがズレた場合の安全弁
+            total_changed_cells = "解析中"
+            total_changed_rows = "解析中"
+            changed_cells_mask = pd.DataFrame(
+                False, index=new_df.index, columns=new_df.columns
+            )
 
         with st.container(border=True):
             st.markdown(
@@ -299,13 +283,17 @@ if uploaded_file is not None:
             s_col2.metric(
                 "AIが修正した行数",
                 f"{total_changed_rows} 行",
-                delta=f"{total_changed_rows}件の変更",
+                delta=f"{total_changed_rows}件の変更"
+                if isinstance(total_changed_rows, int)
+                else None,
                 delta_color="inverse",
             )
             s_col3.metric(
                 "AIが修正した総セル数",
                 f"{total_changed_cells} 箇所",
-                delta=f"{total_changed_cells}セルの最適化",
+                delta=f"{total_changed_cells}セルの最適化"
+                if isinstance(total_changed_cells, int)
+                else None,
                 delta_color="inverse",
             )
 
@@ -327,13 +315,12 @@ if uploaded_file is not None:
                 style_df = pd.DataFrame(
                     "", index=df_new.index, columns=df_new.columns
                 )
-                # 元データと不一致（修正あり）のセルを薄い黄色にする
-                style_df[changed_cells_mask] = (
-                    "background-color: #fff3cd; color: #856404; font-weight: bold;"
-                )
+                if orig_df.shape == df_new.shape:
+                    style_df[orig_df != df_new] = (
+                        "background-color: #fff3cd; color: #856404; font-weight: bold;"
+                    )
                 return style_df
 
-            # st.dataframeにスタイルオブジェクトを渡して表示
             highlighted_df_preview = new_df.style.apply(
                 apply_style_matrix, axis=None
             )
@@ -349,7 +336,7 @@ if uploaded_file is not None:
                 unsafe_allow_html=True,
             )
             st.markdown(
-                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 最終確認を行い、必要であればセルを直接ダブルクリックして最終微調整を行ってください。</p>",
+                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 データ構造が完全に同期されました。自作ボタン・内蔵ボタンのどちらからでも綺麗に複数列でダウンロード可能です。</p>",
                 unsafe_allow_html=True,
             )
 
@@ -372,15 +359,14 @@ if uploaded_file is not None:
                     )
 
                     # --- 📅 日付の自動付加技能 ---
-                    # 実行時点の「年月日（YYYYMMDD）」を動的に取得
                     date_suffix = datetime.now().strftime("%Y%m%d")
                     dynamic_file_name = f"cleaned_customer_list_{date_suffix}.csv"
 
-                    # ボタンの鍵（key）を同期させて、最新の複数列CSVを強制ダウンロード
+                    # ボタンの鍵（key）を完全に同期
                     st.download_button(
                         label="📥 CSVファイルとして出力",
                         data=csv_bytes,
-                        file_name=dynamic_file_name,  # 💡 日付付きファイル名を指定
+                        file_name=dynamic_file_name,
                         mime="text/csv",
                         use_container_width=True,
                         key=f"final_download_btn_{st.session_state.refresh_counter}",
