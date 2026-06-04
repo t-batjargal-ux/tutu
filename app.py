@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 視覚的な微調整（コンテナの上部パディングを最適化）
+# 視覚的な微調整
 st.markdown(
     """
     <style>
@@ -24,7 +24,7 @@ st.markdown(
 # ヘッダーエリア
 st.title("🪄 AI Data Cleansing Professional")
 st.caption(
-    "【プロトタイプ版: OpenAI駆動】データ破損自動修復ロジックを搭載した、絶対に列構造を崩さない完全版プラットフォーム。"
+    "【プロトタイプ版: OpenAI駆動】列構造を完全保護。エディタ内蔵のエクスポート機能を利用する高安定性プラットフォーム。"
 )
 st.markdown("---")
 
@@ -76,30 +76,23 @@ if uploaded_file is not None:
             except UnicodeDecodeError:
                 df = pd.read_csv(uploaded_file, encoding="cp932")
 
-        # 🔥【超強力：過去の壊れたファイル自動サルベージ機能】
-        # もしCSVが1列に潰れて、列名にカンマが含まれていたら、強制的に複数列に分解・修復する
+        # 過去の壊れた1列CSVの自動サルベージ
         if len(df.columns) == 1 and "," in str(df.columns[0]):
             raw_col = df.columns[0]
-            # 潰れた列名を綺麗にバラす
             new_columns = [
                 c.strip().strip('"').strip("'") for c in raw_col.split(",")
             ]
-
             fixed_rows = []
             for val in df[raw_col]:
-                # 潰れた行データを綺麗にバラす
                 row_vals = [
                     str(v).strip().strip('"').strip("'")
                     for v in str(val).split(",")
                 ]
-                # 列数のズレを安全に補正
                 if len(row_vals) < len(new_columns):
                     row_vals += [""] * (len(new_columns) - len(row_vals))
                 elif len(row_vals) > len(new_columns):
                     row_vals = row_vals[: len(new_columns)]
                 fixed_rows.append(row_vals)
-
-            # 正常な複数列のデータフレームとして完全復活
             df = pd.DataFrame(fixed_rows, columns=new_columns)
 
     except Exception as e:
@@ -133,30 +126,21 @@ if uploaded_file is not None:
                 # 表データをJSON形式のテキストに変換
                 data_json_str = df.to_json(orient="records", force_ascii=False)
 
-                # 絶対に列を合体させないよう、厳格なFew-shot（お手本）をプロンプトに注入
+                # 【確実】AIに変な嘘をつかせず、元のキー（列名）を1ミリも弄らせない最強のプロンプト
                 prompt = f"""
-以下のJSON形式のデータを、指定された【指示ルール】に従ってクレンジングし、指定のJSONオブジェクト構造で返してください。
+You are a precise data cleansing engine. Clean the following JSON array of objects based on these strict rules:
 
-【指示ルール】
-1. 「取引先名」などの会社名が入った列の「㈱」や「(株)」はすべて「株式会社」に統一してください。
-2. 「住所」などの住所が入った列の英数字や郵便番号、ハイフンはすべて半角に統一してください。
-3. 元のデータ構造（行数、すべての列名、キー）は完全に維持してください。関係のない列（電話番号、担当者名など）の値は絶対に改変せず、そのまま戻してください。複数の列を1つに合体させるような行為は厳禁とします。
+1. Identify the column containing company/client names. Replace abbreviations like "㈱" or "(株)" with "株式会社".
+2. Identify the column containing addresses. Convert all full-width alphanumeric characters, zip codes, and hyphens to half-width characters.
+3. Keep all other columns and the original keys/schema EXACTLY as they are. Do not merge or combine any columns.
 
-【出力構造】
-必ず、以下のように "data" というキーを持ったJSONオブジェクト形式で出力してください。各オブジェクトは元の列名を完全に保持したキーと値のペアにしてください。
-{{
-  "data": [
-    {{
-      "取引先名": "クレンジング後の値",
-      "住所": "クレンジング後の値",
-      "電話番号": "元の値",
-      "担当者名": "元の値"
-    }}
-  ]
-}}
-
-【対象データ】
+Input Data:
 {data_json_str}
+
+Respond ONLY with a valid JSON object in this format, reusing the exact keys from the input data:
+{{
+  "data": [ ...cleaned objects... ]
+}}
 """
 
                 # OpenAI APIリクエストの送信
@@ -165,7 +149,7 @@ if uploaded_file is not None:
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are a precise data engineering assistant. You clean values while strictly preserving the horizontal columns and vertical row structure without any fusion.",
+                            "content": "You are a professional data architect. You only output valid JSON adhering strictly to the schema.",
                         },
                         {"role": "user", "content": prompt},
                     ],
@@ -173,11 +157,9 @@ if uploaded_file is not None:
                     temperature=0.0,
                 )
 
-                # 返ってきたJSONテキストをパース
-                response_text = response.choices[0].message.content
-                cleaned_json = json.loads(response_text)
+                cleaned_json = json.loads(response.choices[0].message.content)
 
-                # DataFrame に再変換し、キャッシュを殺すためにカウンターを回す
+                # DataFrame に再変換し画面を更新
                 st.session_state.cleaned_df = pd.DataFrame(
                     cleaned_json["data"]
                 )
@@ -195,34 +177,16 @@ if uploaded_file is not None:
                 "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
                 unsafe_allow_html=True,
             )
-            st.markdown(
-                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 必要に応じて、セルをダブルクリックして手動で修正を加えることができます。</p>",
-                unsafe_allow_html=True,
+
+            # 🛠️【最大改善】迷わせないUI：自作ボタンを完全に撤去し、最強の内蔵ボタンへユーザーを誘導
+            st.info(
+                "💡 クレンジングが完了しました！ダウンロードは、**下の表の右上**にマウスを乗せると表示される **「Download as CSV」(下矢印のアイコン)** をクリックしてください。一番綺麗に出力されます。"
             )
 
-            # 動的キーにより、メモリ内の古いゴーストデータを完全に抹消
-            edited_df = st.data_editor(
+            # データエディタの表示
+            st.data_editor(
                 st.session_state.cleaned_df,
                 key=f"data_editor_core_{st.session_state.refresh_counter}",
                 use_container_width=True,
                 hide_index=True,
             )
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            d_col1, d_col2 = st.columns([3, 1])
-            with d_col2:
-                try:
-                    # 最新のエディタ状態から、Excel対応のBOM付きCSVデータをクリーンに生成
-                    csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
-
-                    # ボタンの鍵（key）を完全に同期させ、最新CSVを強制的にダウンロード
-                    st.download_button(
-                        label="📥 CSVファイルとして出力",
-                        data=csv_data,
-                        file_name="cleaned_customer_list.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        key=f"final_download_btn_{st.session_state.refresh_counter}",
-                    )
-                except Exception as e:
-                    st.error(f"CSV生成エラー: {e}")
