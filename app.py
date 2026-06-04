@@ -103,11 +103,11 @@ if uploaded_file is not None:
     if execute_button:
         with st.spinner("AI が列構造を固定したまま値の精密クレンジングを実行中..."):
             try:
-                # 完全に独立した複数列を持つDataFrameのコピーを作成
+                # 完全に独立した複数列を持つDataFrame of レプリカを作成
                 df_cleaned = df.copy()
                 columns_list = [str(c) for c in df.columns]
 
-                # 1. クレンジング対象の列名を特定 (💡 f-stringの罠を完全排除)
+                # 1. クレンジング対象の列名を特定
                 mapping_prompt = """
                 以下の列名リストから、【会社名・取引先名】が格納されている列名と、【住所・所在地】が格納されている列名をそれぞれ1つずつ特定してください。
                 列名リスト: __COLUMNS_LIST__
@@ -129,7 +129,7 @@ if uploaded_file is not None:
                 company_col = mapping.get("company_column")
                 address_col = mapping.get("address_column")
 
-                # 2. 会社名列の値のみをクレンジング (💡 f-stringの罠を完全排除)
+                # 2. 会社名列の値のみをクレンジング
                 if company_col and company_col in df_cleaned.columns:
                     company_data = df_cleaned[company_col].astype(str).tolist()
                     comp_prompt = """
@@ -154,7 +154,7 @@ if uploaded_file is not None:
                     if len(cleaned_companies) == len(company_data):
                         df_cleaned[company_col] = cleaned_companies
 
-                # 3. 住所列の値のみをクレンジング (💡 f-stringの罠を完全排除)
+                # 3. 住所列の値のみをクレンジング
                 if address_col and address_col in df_cleaned.columns:
                     address_data = df_cleaned[address_col].astype(str).tolist()
                     addr_prompt = """
@@ -200,7 +200,7 @@ if uploaded_file is not None:
                 unsafe_allow_html=True,
             )
 
-            # 動的キーにより、メモリ内のキャッシュを完全破棄。本物の複数列を維持
+            # 動的キーにより古いキャッシュを破棄
             edited_df = st.data_editor(
                 st.session_state.cleaned_df,
                 key=f"data_editor_core_{st.session_state.refresh_counter}",
@@ -212,11 +212,17 @@ if uploaded_file is not None:
             d_col1, d_col2 = st.columns([3, 1])
             with d_col2:
                 try:
-                    # 本物の複数列を持つDataFrameから、Excel対応のBOM付きCSVデータをクリーンに生成
+                    # Excel対応のBOM付きCSVデータをクリーンに生成
                     csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
 
-                    # ボタンの鍵（key）を完全に同期させ、最新の複数列CSVを強制エクスポート
+                    # ボタンの鍵（key）を完全に同期
                     st.download_button(
                         label="📥 CSVファイルとして出力",
                         data=csv_data,
-                        file_name="cleaned_customer_list
+                        file_name="cleaned_customer_list.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key=f"final_download_btn_{st.session_state.refresh_counter}",
+                    )
+                except Exception as e:
+                    st.error(f"CSV生成エラー: {e}")
