@@ -5,13 +5,13 @@ from openai import OpenAI
 
 # 1. ページ全体をワイドモードに設定
 st.set_page_config(
-    page_title="AI Data Cleansing Pro (Final)",
+    page_title="AI Data Cleansing Pro (Prototype)",
     page_icon="🪄",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# 視覚的な微調整
+# 視覚的な微調整（コンテナの上部パディングを最適化）
 st.markdown(
     """
     <style>
@@ -24,7 +24,7 @@ st.markdown(
 # ヘッダーエリア
 st.title("🪄 AI Data Cleansing Professional")
 st.caption(
-    "【プロトタイプ版: OpenAI駆動】列構造を完全保護。エディタ内蔵のエクスポート機能を利用する高安定性プラットフォーム。"
+    "【プロトタイプ版: OpenAI駆動】列構造を100%保護し、内蔵エクスポートと自作ボタンを完全に同期したデータクレンジング・プラットフォーム。"
 )
 st.markdown("---")
 
@@ -75,26 +75,6 @@ if uploaded_file is not None:
                 df = pd.read_csv(uploaded_file, encoding="utf-8")
             except UnicodeDecodeError:
                 df = pd.read_csv(uploaded_file, encoding="cp932")
-
-        # 過去の壊れた1列CSVの自動サルベージ
-        if len(df.columns) == 1 and "," in str(df.columns[0]):
-            raw_col = df.columns[0]
-            new_columns = [
-                c.strip().strip('"').strip("'") for c in raw_col.split(",")
-            ]
-            fixed_rows = []
-            for val in df[raw_col]:
-                row_vals = [
-                    str(v).strip().strip('"').strip("'")
-                    for v in str(val).split(",")
-                ]
-                if len(row_vals) < len(new_columns):
-                    row_vals += [""] * (len(new_columns) - len(row_vals))
-                elif len(row_vals) > len(new_columns):
-                    row_vals = row_vals[: len(new_columns)]
-                fixed_rows.append(row_vals)
-            df = pd.DataFrame(fixed_rows, columns=new_columns)
-
     except Exception as e:
         st.error(f"ファイルの読み込みに失敗しました: {e}")
         st.stop()
@@ -113,7 +93,7 @@ if uploaded_file is not None:
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         st.markdown(
-            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>AIが列構造を完全に維持したまま、値を精密にクレンジングします</p>",
+            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>元の列構造を完全に維持したまま、指定列の値のみを精密に書き換えます</p>",
             unsafe_allow_html=True,
         )
         execute_button = st.button(
@@ -121,72 +101,19 @@ if uploaded_file is not None:
         )
 
     if execute_button:
-        with st.spinner("AI が列構造を固定したまま精密クレンジングを実行中..."):
+        with st.spinner("AI が列構造を固定したまま値の精密クレンジングを実行中..."):
             try:
-                # 表データをJSON形式のテキストに変換
-                data_json_str = df.to_json(orient="records", force_ascii=False)
+                # 完全に独立した複数列を持つDataFrameのコピーを作成
+                df_cleaned = df.copy()
+                columns_list = [str(c) for c in df.columns]
 
-                # 【確実】AIに変な嘘をつかせず、元のキー（列名）を1ミリも弄らせない最強のプロンプト
-                prompt = f"""
-You are a precise data cleansing engine. Clean the following JSON array of objects based on these strict rules:
+                # 1. クレンジング対象の列名を特定
+                mapping_prompt = f"""
+                以下の列名リストから、【会社名・取引先名】が格納されている列名と、【住所・所在地】が格納されている列名をそれぞれ1つずつ特定してください。
+                列名リスト: {columns_list}
 
-1. Identify the column containing company/client names. Replace abbreviations like "㈱" or "(株)" with "株式会社".
-2. Identify the column containing addresses. Convert all full-width alphanumeric characters, zip codes, and hyphens to half-width characters.
-3. Keep all other columns and the original keys/schema EXACTLY as they are. Do not merge or combine any columns.
-
-Input Data:
-{data_json_str}
-
-Respond ONLY with a valid JSON object in this format, reusing the exact keys from the input data:
-{{
-  "data": [ ...cleaned objects... ]
-}}
-"""
-
-                # OpenAI APIリクエストの送信
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a professional data architect. You only output valid JSON adhering strictly to the schema.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0.0,
-                )
-
-                cleaned_json = json.loads(response.choices[0].message.content)
-
-                # DataFrame に再変換し画面を更新
-                st.session_state.cleaned_df = pd.DataFrame(
-                    cleaned_json["data"]
-                )
-                st.session_state.refresh_counter += 1
-                st.toast("✨ 精密クレンジングが完了しました！")
-
-            except Exception as e:
-                st.error(f"クレンジング処理中にエラーが発生しました: {e}")
-
-    # --- STEP 4: 整形後データのレビューとエクスポート ---
-    if st.session_state.cleaned_df is not None:
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.container(border=True):
-            st.markdown(
-                "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
-                unsafe_allow_html=True,
-            )
-
-            # 🛠️【最大改善】迷わせないUI：自作ボタンを完全に撤去し、最強の内蔵ボタンへユーザーを誘導
-            st.info(
-                "💡 クレンジングが完了しました！ダウンロードは、**下の表の右上**にマウスを乗せると表示される **「Download as CSV」(下矢印のアイコン)** をクリックしてください。一番綺麗に出力されます。"
-            )
-
-            # データエディタの表示
-            st.data_editor(
-                st.session_state.cleaned_df,
-                key=f"data_editor_core_{st.session_state.refresh_counter}",
-                use_container_width=True,
-                hide_index=True,
-            )
+                必ず以下のJSON構造のみで返答してください。該当する列がない場合はnullにしてください。
+                {{
+                  "company_column": "特定した列名またはnull",
+                  "address_column": "特定した列名またはnull"
+                }}
