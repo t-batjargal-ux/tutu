@@ -18,7 +18,7 @@ st.markdown(
     .block-container { padding-top: 2.5rem; padding-bottom: 2.5rem; }
     </style>
 """,
-    unsafe_html=True,
+    unsafe_allow_html=True,  # 💡 unsafe_html から修正
 )
 
 # ヘッダーエリア
@@ -46,7 +46,7 @@ except Exception as e:
 with st.container(border=True):
     st.markdown(
         "<h4 style='margin-top:0;'>📥 Step 1: 対象ファイルのインポート</h4>",
-        unsafe_html=True,
+        unsafe_allow_html=True,  # 💡 unsafe_html から修正
     )
     uploaded_file = st.file_uploader(
         "CSVまたはExcelファイルをここにドロップしてください（UTF-8 / cp932 / .xlsx 対応）",
@@ -79,7 +79,7 @@ if uploaded_file is not None:
     with st.container(border=True):
         st.markdown(
             f"<h4 style='margin-top:0;'>📋 Step 2: アップロードデータの確認 <span style='font-size:14px; font-weight:normal; color:gray;'>({uploaded_file.name})</span></h4>",
-            unsafe_html=True,
+            unsafe_allow_html=True,  # 💡 unsafe_html から修正
         )
         st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -89,7 +89,7 @@ if uploaded_file is not None:
     with col2:
         st.markdown(
             "<p style='text-align: center; color: gray; margin-bottom: 5px;'>ルール：取引先名の株式会社統一 / 住所の半角統一</p>",
-            unsafe_html=True,
+            unsafe_allow_html=True,  # 💡 unsafe_html から修正
         )
         execute_button = st.button(
             "🚀 クレンジングを一括実行する", type="primary", use_container_width=True
@@ -101,7 +101,7 @@ if uploaded_file is not None:
                 # 表データをJSON形式のテキストに変換
                 data_json_str = df.to_json(orient="records", force_ascii=False)
 
-                # 指示ルールのプロンプト作成（OpenAIのJSON Mode要件に最適化）
+                # 指示ルールのプロンプト作成
                 prompt = f"""
 以下のJSON形式のデータを、指定された【指示ルール】に従ってクレンジングし、指定のJSONオブジェクト構造で返してください。
 
@@ -120,7 +120,7 @@ if uploaded_file is not None:
 {data_json_str}
 """
 
-                # OpenAI APIリクエストの送信（高精度・高速な gpt-4o-mini を採用。必要に応じて gpt-4o に変更可能）
+                # OpenAI APIリクエストの送信
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -131,14 +131,14 @@ if uploaded_file is not None:
                         {"role": "user", "content": prompt},
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.0,  # データの変形を防ぎ、決定論的な出力を得るため0に設定
+                    temperature=0.0,
                 )
 
                 # 返ってきたJSONテキストをパース
                 response_text = response.choices[0].message.content
                 cleaned_json = json.loads(response_text)
 
-                # "data" キーから配列を取り出して DataFrame に再変換
+                # DataFrame に再変換
                 st.session_state.cleaned_df = pd.DataFrame(cleaned_json["data"])
                 st.toast("✨ クレンジング処理が正常に完了しました！")
 
@@ -151,11 +151,11 @@ if uploaded_file is not None:
         with st.container(border=True):
             st.markdown(
                 "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
-                unsafe_html=True,
+                unsafe_allow_html=True,  # 💡 unsafe_html から修正
             )
             st.markdown(
                 "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 必要に応じて、セルをダブルクリックして手動で修正を加えることができます。</p>",
-                unsafe_html=True,
+                unsafe_allow_html=True,  # 💡 unsafe_html から修正
             )
 
             edited_df = st.data_editor(
