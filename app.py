@@ -18,7 +18,7 @@ st.markdown(
     .block-container { padding-top: 2.5rem; padding-bottom: 2.5rem; }
     </style>
 """,
-    unsafe_allow_html=True,  # 💡 unsafe_html から修正
+    unsafe_allow_html=True,
 )
 
 # ヘッダーエリア
@@ -46,7 +46,7 @@ except Exception as e:
 with st.container(border=True):
     st.markdown(
         "<h4 style='margin-top:0;'>📥 Step 1: 対象ファイルのインポート</h4>",
-        unsafe_allow_html=True,  # 💡 unsafe_html から修正
+        unsafe_allow_html=True,
     )
     uploaded_file = st.file_uploader(
         "CSVまたはExcelファイルをここにドロップしてください（UTF-8 / cp932 / .xlsx 対応）",
@@ -75,21 +75,21 @@ if uploaded_file is not None:
         st.stop()
 
     # --- STEP 2: アップロードデータのプレビュー ---
-    st.markdown("<br>", unsafe_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown(
             f"<h4 style='margin-top:0;'>📋 Step 2: アップロードデータの確認 <span style='font-size:14px; font-weight:normal; color:gray;'>({uploaded_file.name})</span></h4>",
-            unsafe_allow_html=True,  # 💡 unsafe_html から修正
+            unsafe_allow_html=True,
         )
         st.dataframe(df, use_container_width=True, hide_index=True)
 
     # --- STEP 3: クレンジング実行エリア ---
-    st.markdown("<br>", unsafe_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         st.markdown(
             "<p style='text-align: center; color: gray; margin-bottom: 5px;'>ルール：取引先名の株式会社統一 / 住所の半角統一</p>",
-            unsafe_allow_html=True,  # 💡 unsafe_html から修正
+            unsafe_allow_html=True,
         )
         execute_button = st.button(
             "🚀 クレンジングを一括実行する", type="primary", use_container_width=True
@@ -147,36 +147,4 @@ if uploaded_file is not None:
 
     # --- STEP 4: 整形後データのレビューとエクスポート ---
     if st.session_state.cleaned_df is not None:
-        st.markdown("<br>", unsafe_html=True)
-        with st.container(border=True):
-            st.markdown(
-                "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
-                unsafe_allow_html=True,  # 💡 unsafe_html から修正
-            )
-            st.markdown(
-                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 必要に応じて、セルをダブルクリックして手動で修正を加えることができます。</p>",
-                unsafe_allow_html=True,  # 💡 unsafe_html から修正
-            )
-
-            edited_df = st.data_editor(
-                st.session_state.cleaned_df,
-                key="cleaned_data_editor",
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            # ダウンロードセクションを右下にスマートに配置
-            st.markdown("<br>", unsafe_html=True)
-            d_col1, d_col2 = st.columns([3, 1])
-            with d_col2:
-                try:
-                    csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
-                    st.download_button(
-                        label="📥 CSVファイルとして出力",
-                        data=csv_data,
-                        file_name="cleaned_customer_list.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-                except Exception as e:
-                    st.error(f"CSV生成エラー: {e}")
+        st.markdown("
