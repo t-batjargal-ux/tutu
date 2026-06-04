@@ -24,7 +24,7 @@ st.markdown(
 # ヘッダーエリア
 st.title("🪄 AI Data Cleansing Professional")
 st.caption(
-    "【プロトタイプ版: OpenAI駆動】高度なAIデータクレンジング・プラットフォーム。列名を自動解析し、最適な表記統一を自律的に実行します。"
+    "【プロトタイプ版: OpenAI駆動】高度なAIデータクレンジング・プラットフォーム。古いキャッシュを完全に排除した安全なエクスポートが可能です。"
 )
 st.markdown("---")
 
@@ -54,13 +54,23 @@ with st.container(border=True):
         label_visibility="collapsed",
     )
 
-# 【最重要】Streamlitのボタンキャッシュバグを殺すためのカウンターを設置
+# セッション状態の完全な初期化
 if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
-if "download_trigger_id" not in st.session_state:
-    st.session_state.download_trigger_id = 0
+if "previous_file_name" not in st.session_state:
+    st.session_state.previous_file_name = ""
+if "refresh_counter" not in st.session_state:
+    st.session_state.refresh_counter = 0
 
+# 🔥【最重要リセットロジック】新しいファイルがドロップされたら、過去の記憶を完全に抹消する
 if uploaded_file is not None:
+    if st.session_state.previous_file_name != uploaded_file.name:
+        st.session_state.cleaned_df = None  # 古いデータを消去
+        st.session_state.previous_file_name = uploaded_file.name
+        st.session_state.refresh_counter += (
+            1  # カウンターを増やしてコンポーネントを強制リフレッシュ
+        )
+
     # 3. ファイルの読み込み（拡張子自動判別）
     try:
         if uploaded_file.name.endswith(".xlsx"):
@@ -141,12 +151,10 @@ if uploaded_file is not None:
                 response_text = response.choices[0].message.content
                 cleaned_json = json.loads(response_text)
 
-                # DataFrame に再変換
+                # DataFrame に再変換し、リフレッシュカウンターを更新
                 st.session_state.cleaned_df = pd.DataFrame(cleaned_json["data"])
-                
-                # 【ここが肝】処理が成功したらカウンターを増やし、古いダウンロードボタンを消滅させる
-                st.session_state.download_trigger_id += 1
-                
+                st.session_state.refresh_counter += 1
+
                 st.toast("✨ クレンジング処理が正常に完了しました！")
 
             except Exception as e:
@@ -165,9 +173,10 @@ if uploaded_file is not None:
                 unsafe_allow_html=True,
             )
 
+            # 🔥 表（データエディタ）自体もIDを動的に変えて、古いキャッシュを完全に殺す
             edited_df = st.data_editor(
                 st.session_state.cleaned_df,
-                key="cleaned_data_editor",
+                key=f"data_editor_core_{st.session_state.refresh_counter}",
                 use_container_width=True,
                 hide_index=True,
             )
@@ -177,16 +186,17 @@ if uploaded_file is not None:
             d_col1, d_col2 = st.columns([3, 1])
             with d_col2:
                 try:
+                    # 最新のエディタ状態からCSVデータを生成
                     csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
-                    
-                    # 【ここが肝】keyに動的なIDを埋め込むことで、毎回最新のCSVを抱え直させる
+
+                    # 🔥 ダウンロードボタンの鍵（key）を完全に同期させ、最新CSVを強制的に抱え直させる
                     st.download_button(
                         label="📥 CSVファイルとして出力",
                         data=csv_data,
                         file_name="cleaned_customer_list.csv",
                         mime="text/csv",
                         use_container_width=True,
-                        key=f"download_btn_{st.session_state.download_trigger_id}"
+                        key=f"final_download_btn_{st.session_state.refresh_counter}",
                     )
                 except Exception as e:
                     st.error(f"CSV生成エラー: {e}")
