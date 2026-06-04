@@ -54,9 +54,11 @@ with st.container(border=True):
         label_visibility="collapsed",
     )
 
-# セッション状態で整形後データを管理
+# 【最重要】Streamlitのボタンキャッシュバグを殺すためのカウンターを設置
 if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
+if "download_trigger_id" not in st.session_state:
+    st.session_state.download_trigger_id = 0
 
 if uploaded_file is not None:
     # 3. ファイルの読み込み（拡張子自動判別）
@@ -101,7 +103,7 @@ if uploaded_file is not None:
                 # 表データをJSON形式のテキストに変換
                 data_json_str = df.to_json(orient="records", force_ascii=False)
 
-                # 【劇的改善】固定列名に依存しない、自律型のプロンプトへ変更
+                # 指示ルールのプロンプト作成
                 prompt = f"""
 以下のJSON形式のデータを、指定された【指示ルール】に従ってインテリジェントにクレンジングし、指定のJSONオブジェクト構造で返してください。
 
@@ -127,7 +129,7 @@ if uploaded_file is not None:
                     messages=[
                         {
                             "role": "system",
-                            "content": "You are an expert data architect. You analyze the semantic meaning of columns and perform robust data cleansing according to the rules, while strictly preserving unก็touched columns and schema.",
+                            "content": "You are an expert data architect. You analyze the semantic meaning of columns and perform robust data cleansing according to the rules, while strictly preserving untouched columns and schema.",
                         },
                         {"role": "user", "content": prompt},
                     ],
@@ -141,6 +143,10 @@ if uploaded_file is not None:
 
                 # DataFrame に再変換
                 st.session_state.cleaned_df = pd.DataFrame(cleaned_json["data"])
+                
+                # 【ここが肝】処理が成功したらカウンターを増やし、古いダウンロードボタンを消滅させる
+                st.session_state.download_trigger_id += 1
+                
                 st.toast("✨ クレンジング処理が正常に完了しました！")
 
             except Exception as e:
@@ -172,12 +178,15 @@ if uploaded_file is not None:
             with d_col2:
                 try:
                     csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
+                    
+                    # 【ここが肝】keyに動的なIDを埋め込むことで、毎回最新のCSVを抱え直させる
                     st.download_button(
                         label="📥 CSVファイルとして出力",
                         data=csv_data,
                         file_name="cleaned_customer_list.csv",
                         mime="text/csv",
                         use_container_width=True,
+                        key=f"download_btn_{st.session_state.download_trigger_id}"
                     )
                 except Exception as e:
                     st.error(f"CSV生成エラー: {e}")
