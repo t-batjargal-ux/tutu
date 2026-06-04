@@ -24,7 +24,7 @@ st.markdown(
 # ヘッダーエリア
 st.title("🪄 AI Data Cleansing Professional")
 st.caption(
-    "【プロトタイプ版: OpenAI駆動】APIレベルで列構造を完全固定。自作ボタンと内蔵ボタンの100%同期を実現した完全版プラットフォーム。"
+    "【プロトタイプ版: OpenAI駆動】列構造を完全固定し、日本のExcel環境に100%適合させた完全同期プラットフォーム。"
 )
 st.markdown("---")
 
@@ -75,7 +75,7 @@ if uploaded_file is not None:
                 df = pd.read_csv(uploaded_file, encoding="utf-8")
             except UnicodeDecodeError:
                 df = pd.read_csv(uploaded_file, encoding="cp932")
-                
+
         # すべての列名を文字列型に強制変換して安定化
         df.columns = [str(c) for c in df.columns]
     except Exception as e:
@@ -110,7 +110,7 @@ if uploaded_file is not None:
                 df_str = df.astype(str)
                 data_json_str = df_str.to_json(orient="records", force_ascii=False)
 
-                # 🔥【ここがプロの技】アップロードされたCSVの列構造に合わせたJSONスキーマを動的に完全自動生成
+                # アップロードされたCSVの列構造に合わせたJSONスキーマを動的に完全自動生成（Structured Outputs）
                 properties_schema = {str(col): {"type": "string"} for col in df.columns}
                 required_schema = [str(col) for col in df.columns]
 
@@ -148,7 +148,7 @@ if uploaded_file is not None:
                 {data_json_str}
                 """
 
-                # OpenAI APIリクエストの送信（Structured Outputs技術の適用）
+                # OpenAI APIリクエストの送信
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -161,11 +161,10 @@ if uploaded_file is not None:
                     response_format={
                         "type": "json_schema",
                         "json_schema": json_schema,
-                    },  # 💡ここで構造を絶対固定
+                    },
                     temperature=0.0,
                 )
 
-                # 返ってきた完璧な構造のJSONをパース
                 result_json = json.loads(response.choices[0].message.content)
 
                 # DataFrame に再変換し、画面とボタンのキャッシュを一新する
@@ -189,7 +188,7 @@ if uploaded_file is not None:
                 unsafe_allow_html=True,
             )
 
-            # 動的キーにより、メモリ内の古いゴーストデータを完全に消滅させる
+            # 動的キーにより古いキャッシュを消滅させる
             edited_df = st.data_editor(
                 st.session_state.cleaned_df,
                 key=f"data_editor_core_{st.session_state.refresh_counter}",
@@ -201,13 +200,15 @@ if uploaded_file is not None:
             d_col1, d_col2 = st.columns([3, 1])
             with d_col2:
                 try:
-                    # 本物の複数列を持つDataFrameから、Excel対応のBOM付きCSVデータを生成
-                    csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
+                    # 💡【修正の肝】日本のExcelに100%適合させるため、当初の仕様通り cp932 (Shift_JIS) 形式のバイナリデータに直接変換
+                    csv_bytes = edited_df.to_csv(index=False).encode(
+                        "cp932", errors="replace"
+                    )
 
                     # ボタンの鍵（key）を完全に同期させ、最新の複数列CSVを強制ダウンロード
                     st.download_button(
                         label="📥 CSVファイルとして出力",
-                        data=csv_data,
+                        data=csv_bytes,
                         file_name="cleaned_customer_list.csv",
                         mime="text/csv",
                         use_container_width=True,
