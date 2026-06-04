@@ -5,13 +5,13 @@ from openai import OpenAI
 
 # 1. ページ全体をワイドモードに設定
 st.set_page_config(
-    page_title="AI Data Cleansing Pro (Prototype)",
+    page_title="AI Data Cleansing Pro (Final)",
     page_icon="🪄",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# 視覚的な微調整（コンテナの上部パディングを最適化）
+# 視覚的な微調整
 st.markdown(
     """
     <style>
@@ -24,7 +24,7 @@ st.markdown(
 # ヘッダーエリア
 st.title("🪄 AI Data Cleansing Professional")
 st.caption(
-    "【プロトタイプ版: OpenAI駆動】列構造を100%保護し、内蔵エクスポートと自作ボタンを完全に同期したデータクレンジング・プラットフォーム。"
+    "【プロトタイプ版: OpenAI駆動】APIレベルで列構造を完全固定。自作ボタンと内蔵ボタンの100%同期を実現した完全版プラットフォーム。"
 )
 st.markdown("---")
 
@@ -75,6 +75,9 @@ if uploaded_file is not None:
                 df = pd.read_csv(uploaded_file, encoding="utf-8")
             except UnicodeDecodeError:
                 df = pd.read_csv(uploaded_file, encoding="cp932")
+                
+        # すべての列名を文字列型に強制変換して安定化
+        df.columns = [str(c) for c in df.columns]
     except Exception as e:
         st.error(f"ファイルの読み込みに失敗しました: {e}")
         st.stop()
@@ -93,7 +96,7 @@ if uploaded_file is not None:
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
         st.markdown(
-            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>元の列構造を完全に維持したまま、指定列の値のみを精密に書き換えます</p>",
+            "<p style='text-align: center; color: gray; margin-bottom: 5px;'>AIが列構造を完全に維持したまま、値を精密にクレンジングします</p>",
             unsafe_allow_html=True,
         )
         execute_button = st.button(
@@ -101,86 +104,72 @@ if uploaded_file is not None:
         )
 
     if execute_button:
-        with st.spinner("AI が列構造を固定したまま値の精密クレンジングを実行中..."):
+        with st.spinner("AI が列構造を完全固定したまま精密クレンジングを実行中..."):
             try:
-                # 完全に独立した複数列を持つDataFrame of レプリカを作成
-                df_cleaned = df.copy()
-                columns_list = [str(c) for c in df.columns]
+                # パースエラーを防ぐため、全データを一度文字列にキャストしてJSON化
+                df_str = df.astype(str)
+                data_json_str = df_str.to_json(orient="records", force_ascii=False)
 
-                # 1. クレンジング対象の列名を特定
-                mapping_prompt = """
-                以下の列名リストから、【会社名・取引先名】が格納されている列名と、【住所・所在地】が格納されている列名をそれぞれ1つずつ特定してください。
-                列名リスト: __COLUMNS_LIST__
+                # 🔥【ここがプロの技】アップロードされたCSVの列構造に合わせたJSONスキーマを動的に完全自動生成
+                properties_schema = {str(col): {"type": "string"} for col in df.columns}
+                required_schema = [str(col) for col in df.columns]
 
-                必ず以下のJSON構造のみで返答してください。該当する列がない場合はnullにしてください。
-                {
-                  "company_column": "特定した列名またはnull",
-                  "address_column": "特定した列名またはnull"
+                json_schema = {
+                    "name": "structured_cleansing_schema",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": properties_schema,
+                                    "required": required_schema,
+                                    "additionalProperties": False,
+                                },
+                            }
+                        },
+                        "required": ["data"],
+                        "additionalProperties": False,
+                    },
                 }
-                """.replace("__COLUMNS_LIST__", str(columns_list))
 
-                map_res = client.chat.completions.create(
+                # クレンジングの指示プロンプト
+                prompt = f"""
+                ユーザーから提供された以下の名簿データをクレンジングルールに従って整形してください。
+
+                【クレンジングルール】
+                1. 会社名や取引先名が含まれる列（例：「取引先名」「会社名」など）について、「㈱」や「(株)」などの略称をすべて「株式会社」に統一してください。
+                2. 住所情報が含まれる列（例：「住所」「所在地」など）について、その中にある英数字、郵便番号、ハイフン、長音記号（ー）をすべて半角（ハイフンは「-」）に統一してください。
+                3. それ以外の列（電話番号、担当者名など）の内容は絶対に書き換えず、そのまま保持してください。
+
+                【対象データ】
+                {data_json_str}
+                """
+
+                # OpenAI APIリクエストの送信（Structured Outputs技術の適用）
+                response = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": mapping_prompt}],
-                    response_format={"type": "json_object"},
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a precise data cleansing assistant. You must follow the rules and match the required JSON schema perfectly without altering keys or row counts.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": json_schema,
+                    },  # 💡ここで構造を絶対固定
                     temperature=0.0,
                 )
-                mapping = json.loads(map_res.choices[0].message.content)
-                company_col = mapping.get("company_column")
-                address_col = mapping.get("address_column")
 
-                # 2. 会社名列の値のみをクレンジング
-                if company_col and company_col in df_cleaned.columns:
-                    company_data = df_cleaned[company_col].astype(str).tolist()
-                    comp_prompt = """
-                    以下の文字列配列（会社名）について、「㈱」や「(株)」などの略称をすべて「株式会社」に統一してください。
-                    元の文字列の意味や順序、配列の要素数は絶対に改変しないでください。
-                    必ず、入力と全く同じ要素数（__LEN__個）の配列を以下のJSON形式で返してください。
-                    { "cleaned": ["値1", "値2", ...] }
-                    対象データ: __DATA__
-                    """.replace("__LEN__", str(len(company_data))).replace(
-                        "__DATA__", json.dumps(company_data, ensure_ascii=False)
-                    )
+                # 返ってきた完璧な構造のJSONをパース
+                result_json = json.loads(response.choices[0].message.content)
 
-                    comp_res = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": comp_prompt}],
-                        response_format={"type": "json_object"},
-                        temperature=0.0,
-                    )
-                    cleaned_companies = json.loads(
-                        comp_res.choices[0].message.content
-                    ).get("cleaned", [])
-                    if len(cleaned_companies) == len(company_data):
-                        df_cleaned[company_col] = cleaned_companies
-
-                # 3. 住所列の値のみをクレンジング
-                if address_col and address_col in df_cleaned.columns:
-                    address_data = df_cleaned[address_col].astype(str).tolist()
-                    addr_prompt = """
-                    以下の文字列配列（住所）について、含まれる英数字、郵便番号、ハイフン、長音記号（ー）をすべて半角（ハイフンは「-」）に統一してください。
-                    漢字の地名やビル名などは絶対に書き換えないでください。順序や配列の要素数は絶対に改変しないでください。
-                    必ず、入力と全く同じ要素数（__LEN__個）の配列を以下のJSON形式で返してください。
-                    { "cleaned": ["値1", "値2", ...] }
-                    対象データ: __DATA__
-                    """.replace("__LEN__", str(len(address_data))).replace(
-                        "__DATA__", json.dumps(address_data, ensure_ascii=False)
-                    )
-
-                    addr_res = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": addr_prompt}],
-                        response_format={"type": "json_object"},
-                        temperature=0.0,
-                    )
-                    cleaned_addresses = json.loads(
-                        addr_res.choices[0].message.content
-                    ).get("cleaned", [])
-                    if len(cleaned_addresses) == len(address_data):
-                        df_cleaned[address_col] = cleaned_addresses
-
-                # セッション状態を更新し、コンポーネントのIDを強制リフレッシュ
-                st.session_state.cleaned_df = df_cleaned
+                # DataFrame に再変換し、画面とボタンのキャッシュを一新する
+                st.session_state.cleaned_df = pd.DataFrame(result_json["data"])
                 st.session_state.refresh_counter += 1
                 st.toast("✨ 精密クレンジングが完了しました！")
 
@@ -200,7 +189,7 @@ if uploaded_file is not None:
                 unsafe_allow_html=True,
             )
 
-            # 動的キーにより古いキャッシュを破棄
+            # 動的キーにより、メモリ内の古いゴーストデータを完全に消滅させる
             edited_df = st.data_editor(
                 st.session_state.cleaned_df,
                 key=f"data_editor_core_{st.session_state.refresh_counter}",
@@ -212,10 +201,10 @@ if uploaded_file is not None:
             d_col1, d_col2 = st.columns([3, 1])
             with d_col2:
                 try:
-                    # Excel対応のBOM付きCSVデータをクリーンに生成
+                    # 本物の複数列を持つDataFrameから、Excel対応のBOM付きCSVデータを生成
                     csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
 
-                    # ボタンの鍵（key）を完全に同期
+                    # ボタンの鍵（key）を完全に同期させ、最新の複数列CSVを強制ダウンロード
                     st.download_button(
                         label="📥 CSVファイルとして出力",
                         data=csv_data,
