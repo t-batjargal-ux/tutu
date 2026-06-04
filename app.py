@@ -8,7 +8,7 @@ st.set_page_config(layout="wide")
 
 st.title("✨ AIデータクレンジング・アシスタント")
 st.write(
-    "アップロードされたCSVデータを、Gemini APIを利用して自動で表記揺れの修正や整形を行います。"
+    "アップロードされたCSVまたはExcelデータを、Gemini APIを利用して自動で表記揺れの修正や整形を行います。"
 )
 
 # 6. APIキーを st.secrets から取得し設定
@@ -24,10 +24,10 @@ except Exception as e:
     st.error(f"APIの初期化中にエラーが発生しました: {e}")
     st.stop()
 
-# 2. CSVファイルのみをアップロードできるように設定
+# 2. 【変更】CSVに加えて、Excelファイル（.xlsx）もアップロードできるように設定
 uploaded_file = st.file_uploader(
-    "クレンジングしたいCSVファイルを選択してください（UTF-8 / cp932 両対応）",
-    type=["csv"],
+    "クレンジングしたいファイルを選択してください（CSV / Excel .xlsx 両対応）",
+    type=["csv", "xlsx"],
 )
 
 # Streamlitの再実行によるデータ消失を防ぐため、セッション状態で整形後データを管理
@@ -35,20 +35,23 @@ if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
 
 if uploaded_file is not None:
-    # 3. ファイルの読み込み（UTF-8 と cp932 を自動判別してエラーを防止）
+    # 3. 【変更】ファイルの読み込み（拡張子がxlsxならExcelとして、それ以外ならCSVとして自動判別）
     try:
-        try:
-            # まずは一般的な UTF-8 で読み込みを試みる
-            df = pd.read_csv(uploaded_file, encoding="utf-8")
-        except UnicodeDecodeError:
-            # エラーが出たら、cp932（Shift_JIS）で読み込みを試みる
-            df = pd.read_csv(uploaded_file, encoding="cp932")
+        if uploaded_file.name.endswith(".xlsx"):
+            # Excelファイルを読み込む
+            df = pd.read_excel(uploaded_file)
+        else:
+            # CSVファイルを読み込む（UTF-8 と cp932 を自動判別）
+            try:
+                df = pd.read_csv(uploaded_file, encoding="utf-8")
+            except UnicodeDecodeError:
+                df = pd.read_csv(uploaded_file, encoding="cp932")
 
         st.subheader("📋 アップロードデータのプレビュー")
         st.dataframe(df, use_container_width=True)
     except Exception as e:
         st.error(
-            f"CSVファイルの読み込みに失敗しました。文字コードが UTF-8 または cp932（Shift_JIS）であることを確認してください。エラー: {e}"
+            f"ファイルの読み込みに失敗しました。ファイルが破損していないか、形式を確認してください。エラー: {e}"
         )
         st.stop()
 
