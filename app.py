@@ -147,4 +147,36 @@ if uploaded_file is not None:
 
     # --- STEP 4: 整形後データのレビューとエクスポート ---
     if st.session_state.cleaned_df is not None:
-        st.markdown("
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(
+                "<h4 style='margin-top:0;'>📝 Step 3: クレンジング済みデータの最終レビュー</h4>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<p style='font-size: 13px; color: #1f77b4; margin-bottom: 15px;'>💡 必要に応じて、セルをダブルクリックして手動で修正を加えることができます。</p>",
+                unsafe_allow_html=True,
+            )
+
+            edited_df = st.data_editor(
+                st.session_state.cleaned_df,
+                key="cleaned_data_editor",
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # ダウンロードセクションを右下にスマートに配置
+            st.markdown("<br>", unsafe_allow_html=True)
+            d_col1, d_col2 = st.columns([3, 1])
+            with d_col2:
+                try:
+                    csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 CSVファイルとして出力",
+                        data=csv_data,
+                        file_name="cleaned_customer_list.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"CSV生成エラー: {e}")
