@@ -7,13 +7,15 @@ import streamlit as st
 st.set_page_config(layout="wide")
 
 st.title("✨ AIデータクレンジング・アシスタント")
-st.write("アップロードされたCSVデータを、Gemini APIを利用して自動で表記揺れの修正や整形を行います。")
+st.write(
+    "アップロードされたCSVデータを、Gemini APIを利用して自動で表記揺れの修正や整形を行います。"
+)
 
 # 6. APIキーを st.secrets から取得し設定
 try:
     if "GEMINI_API_KEY" not in st.secrets:
         st.error(
-            "エラー: `GEMINI_API_KEY` が設定されていません。`.streamlit/secrets.toml` ファイルを確認してください。"
+            "エラー: `GEMINI_API_KEY` が設定されていません。Streamlit Cloudの Advanced settings ➔ Secrets に登録してください。"
         )
         st.stop()
 
@@ -24,7 +26,7 @@ except Exception as e:
 
 # 2. CSVファイルのみをアップロードできるように設定
 uploaded_file = st.file_uploader(
-    "クレンジングしたいCSVファイル（Shift_JIS / cp932）を選択してください",
+    "クレンジングしたいCSVファイルを選択してください（UTF-8 / cp932 両対応）",
     type=["csv"],
 )
 
@@ -33,15 +35,20 @@ if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
 
 if uploaded_file is not None:
-    # 3. ファイルを cp932 で読み込み、プレビュー表示
+    # 3. ファイルの読み込み（UTF-8 と cp932 を自動判別してエラーを防止）
     try:
-        # 毎回再読み込みされるのを防ぐ、または常に最新の状態を参照
-        df = pd.read_csv(uploaded_file, encoding="cp932")
+        try:
+            # まずは一般的な UTF-8 で読み込みを試みる
+            df = pd.read_csv(uploaded_file, encoding="utf-8")
+        except UnicodeDecodeError:
+            # エラーが出たら、cp932（Shift_JIS）で読み込みを試みる
+            df = pd.read_csv(uploaded_file, encoding="cp932")
+
         st.subheader("📋 アップロードデータのプレビュー")
         st.dataframe(df, use_container_width=True)
     except Exception as e:
         st.error(
-            f"CSVファイルの読み込みに失敗しました。エンコーディングが「cp932（Shift_JIS）」であることを確認してください。エラー: {e}"
+            f"CSVファイルの読み込みに失敗しました。文字コードが UTF-8 または cp932（Shift_JIS）であることを確認してください。エラー: {e}"
         )
         st.stop()
 
@@ -53,7 +60,7 @@ if uploaded_file is not None:
                 # 7. モデル（gemini-1.5-flash）の呼び出し
                 model = genai.GenerativeModel("gemini-1.5-flash")
 
-                # 8. 表データをJSON形式のテキストに変換 (orient='records' で扱いやすい配列に変換)
+                # 8. 表データをJSON形式のテキストに変換 (orient='records' で配列形式に)
                 data_json_str = df.to_json(orient="records", force_ascii=False)
 
                 # 指示ルールのプロンプト作成
@@ -86,7 +93,7 @@ if uploaded_file is not None:
 
             except json.JSONDecodeError as json_err:
                 st.error(
-                    f"Geminiからの応答をJSONとしてパースできませんでした。プロンプトやデータ量を見直してください。: {json_err}"
+                    f"Geminiからの応答をJSONとしてパースできませんでした。データ構造が複雑すぎる可能性があります。: {json_err}"
                 )
                 if "response" in locals() and hasattr(response, "text"):
                     with st.expander("APIからの生の応答データ"):
@@ -108,8 +115,8 @@ if uploaded_file is not None:
 
         # 12. ダウンロードボタンの配置とエラーハンドリング
         try:
-            # 編集後のデータを cp932 でCSV文字列に変換
-            csv_data = edited_df.to_csv(index=False, encoding="cp932")
+            # 日本のExcelでダブルクリックして開いても絶対に文字化けしないよう、BOM付きUTF-8 (utf-8-sig) で出力
+            csv_data = edited_df.to_csv(index=False, encoding="utf-8-sig")
 
             st.download_button(
                 label="📥 クレンジング済みデータをダウンロード (CSV)",
