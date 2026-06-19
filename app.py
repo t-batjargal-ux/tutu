@@ -2,7 +2,6 @@ import gradio as gr
 from openai import OpenAI
 import tempfile
 from pydub import AudioSegment
-from gtts import gTTS
 import os
 
 # セキュリティ対策：APIキーはRenderの管理画面から環境変数として読み込む
@@ -22,11 +21,13 @@ def process_inside_dx_rag(audio_path):
         return "マイクを確認できません。", None
     
     try:
+        # 音声の洗浄
         audio = AudioSegment.from_file(audio_path)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
             audio.export(tmp_wav.name, format="wav")
             clean_audio_path = tmp_wav.name
 
+        # 耳：Whisperでの音声認識
         with open(clean_audio_path, "rb") as f:
             transcript = client.audio.transcriptions.create(
                 model="whisper-1", file=f, language="ja",
@@ -34,12 +35,20 @@ def process_inside_dx_rag(audio_path):
             )
         user_text = transcript.text.strip()
         
+        # トリガー判定
         if not any(target in user_text for target in ["ニックス", "ニクス", "ニック"]):
             error_msg = "ご用件は「ニックス」と呼びかけてからお話しください。"
-            tts = gTTS(text=error_msg, lang='ja')
-            tts.save("error.mp3")
-            return error_msg, "error.mp3"
+            
+            # 【変更点】エラー時もOpenAIの高音質TTSを使用
+            error_audio_response = client.audio.speech.create(
+                model="tts-1",
+                voice="nova", # nova: 落ち着いた女性の声（アシスタントに最適）
+                input=error_msg
+            )
+            error_audio_response.stream_to_file("response.mp3")
+            return error_msg, "response.mp3"
 
+        # 脳：RAG（マニュアル検索）処理
         system_prompt = f"""
         あなたは現場の職人をサポートするAIパートナーです。
         以下のマニュアル情報をもとに、箇条書きや番号付きリストは一切使わず、自然な話し言葉（です・ます調）の文章だけで回答してください。
@@ -55,11 +64,16 @@ def process_inside_dx_rag(audio_path):
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
         )
         reply = response.choices[0].message.content
-
         reply = reply.replace("*", "").replace("#", "")
 
-        tts = gTTS(text=reply, lang='ja')
-        tts.save("response.mp3")
+        # 💡 【変更点】口：gTTSを廃止し、OpenAIの公式TTSを使用
+        # tts-1モデルは高速で、音声対話に最適です
+        audio_response = client.audio.speech.create(
+            model="tts-1",
+            voice="nova", # 音声の種類（alloy, echo, fable, onyx, nova, shimmerから選択可能）
+            input=reply
+        )
+        audio_response.stream_to_file("response.mp3")
         
         return f"認識: {user_text}\n\nEYES回答:\n{reply}", "response.mp3"
 
@@ -79,6 +93,5 @@ with gr.Blocks(theme=gr.themes.Soft()) as app:
         outputs=[out_text, out_audio]
     )
 
-# サーバー環境向けの設定（0.0.0.0でポート10000を開放）
 if __name__ == "__main__":
     app.launch(server_name="0.0.0.0", server_port=10000)
